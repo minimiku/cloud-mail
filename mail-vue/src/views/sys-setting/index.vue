@@ -215,6 +215,19 @@
                   </el-button>
                 </div>
               </div>
+              <div class="setting-item">
+                <div>
+                  <span>{{ $t('openApiDomains') }}</span>
+                </div>
+                <div class="forward open-api-status">
+                  <span class="route-path">
+                    {{ setting.openApiDomainList?.length ? setting.openApiDomainList.join(', ') : $t('openApiDomainsDesc') }}
+                  </span>
+                  <el-button class="opt-button" size="small" type="primary" @click="openOpenApiDomainSetting">
+                    <Icon icon="fluent:settings-48-regular" width="16" height="16"/>
+                  </el-button>
+                </div>
+              </div>
               <div class="open-api-routes">
                 <div class="open-api-route" v-for="item in openApiRoutes" :key="item.path">
                   <div class="route-info">
@@ -476,6 +489,29 @@
           <el-input readonly :model-value="latestOpenApiKey"/>
           <el-button type="primary" :disabled="!latestOpenApiKey" @click="copyText(latestOpenApiKey)">
             {{ $t('copyKey') }}
+          </el-button>
+        </div>
+      </el-dialog>
+      <el-dialog v-model="openApiDomainShow" :title="$t('openApiDomainsConfig')" width="420" @closed="resetOpenApiDomainList">
+        <div class="open-api-dialog">
+          <div class="setting-desc">{{ $t('openApiDomainsDesc') }}</div>
+          <el-select
+              v-model="openApiDomainList"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              style="width: 100%;"
+          >
+            <el-option
+                v-for="item in setting.domainList"
+                :key="item"
+                :label="item"
+                :value="item"
+            />
+          </el-select>
+          <el-button type="primary" :loading="settingLoading" @click="saveOpenApiDomainList">
+            {{ $t('save') }}
           </el-button>
         </div>
       </el-dialog>
@@ -825,6 +861,7 @@ const userStore = useUserStore();
 const editTitleShow = ref(false)
 const resendTokenFormShow = ref(false)
 const openApiKeyShow = ref(false)
+const openApiDomainShow = ref(false)
 const r2DomainShow = ref(false)
 const turnstileShow = ref(false)
 const tgSettingShow = ref(false)
@@ -844,6 +881,7 @@ const r2DomainInput = ref('')
 const loginOpacity = ref(0)
 const minEmailPrefix = ref(0)
 const emailPrefixFilter = ref([])
+const openApiDomainList = ref([])
 const backgroundUrl = ref('')
 let backgroundFile = {}
 const showSetBackground = ref(false)
@@ -941,6 +979,7 @@ function getSettings() {
     resetNoticeForm()
     resetAddS3Form()
     resetEmailPrefix()
+    resetOpenApiDomainList()
   })
 }
 
@@ -1092,6 +1131,10 @@ function openEmailPrefix() {
   emailPrefixShow.value = true
 }
 
+function openOpenApiDomainSetting() {
+  openApiDomainShow.value = true
+}
+
 function openForwardRules() {
   ruleType.value = setting.value.ruleType
   ruleEmail.value = []
@@ -1215,11 +1258,19 @@ function resetEmailPrefix() {
   emailPrefixFilter.value = setting.value.emailPrefixFilter
 }
 
+function resetOpenApiDomainList() {
+  openApiDomainList.value = [...(setting.value.openApiDomainList || [])]
+}
+
 function saveEmailPrefix() {
   const form = {}
   form.minEmailPrefix = minEmailPrefix.value
   form.emailPrefixFilter = emailPrefixFilter.value
   editSetting(form, true)
+}
+
+function saveOpenApiDomainList() {
+  editSetting({openApiDomainList: openApiDomainList.value}, true)
 }
 
 const opacityChange = debounce(doOpacityChange, 1000, {
@@ -1469,6 +1520,7 @@ function editSetting(settingForm, refreshStatus = true) {
     noticePopupShow.value = false
     addS3Show.value = false
     emailPrefixShow.value = false
+    openApiDomainShow.value = false
   }).catch((e) => {
     loginOpacity.value = setting.value.loginOpacity
     setting.value = {...setting.value, ...JSON.parse(backup)}
