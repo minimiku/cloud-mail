@@ -34,6 +34,13 @@ const saltHashUtils = {
 			result += chars.charAt(Math.floor(Math.random() * chars.length));
 		}
 		return result;
+	},
+
+	genRandomToken(length = 32) {
+		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+		const array = new Uint8Array(length);
+		crypto.getRandomValues(array);
+		return Array.from(array, item => chars[item % chars.length]).join('');
 	}
 };
 

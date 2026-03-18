@@ -1,5 +1,6 @@
 import app from './hono';
 import '../security/security'
+import '../security/open-api-security'
 
 import '../api/email-api';
 import '../api/user-api';
@@ -20,4 +21,5 @@ import '../api/reg-key-api'
 import '../api/public-api'
 import '../api/telegram-api'
 import '../api/oauth-api'
+import '../api/open-api-api'
 export default app;

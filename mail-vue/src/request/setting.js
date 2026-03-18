@@ -8,6 +8,14 @@ export function settingQuery() {
     return http.get('/setting/query')
 }
 
+export function regenerateOpenApiKey() {
+    return http.post('/setting/openApi/regenerate')
+}
+
+export function clearOpenApiKey() {
+    return http.delete('/setting/openApi/clear')
+}
+
 export function websiteConfig() {
     return http.get('/setting/websiteConfig')
 }

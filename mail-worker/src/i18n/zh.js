@@ -65,6 +65,10 @@ const zh = {
 	notAdmin: '输入的邮箱不是管理员邮箱',
 	emailExistDatabase: '有邮箱已存在数据库中',
 	notConfigOss: '对象存储未配置',
+	openApiDisabled: '开放 API 未启用',
+	openApiKeyFail: 'API Key 验证失败',
+	notExistMailbox: '邮箱不存在',
+	notExistMailboxEmail: '邮件不存在',
 	perms: {
 		"邮件": "邮件",
 		"邮件发送": "邮件发送",

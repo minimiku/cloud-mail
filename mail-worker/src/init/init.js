@@ -28,8 +28,17 @@ const dbInit = {
 		await this.v2_7DB(c);
 		await this.v2_8DB(c);
 		await this.v2_9DB(c);
+		await this.v2_10DB(c);
 		await settingService.refresh(c);
 		return c.text('success');
+	},
+
+	async v2_10DB(c) {
+		try {
+			await c.env.db.prepare(`ALTER TABLE setting ADD COLUMN open_api_key TEXT NOT NULL DEFAULT '';`).run();
+		} catch (e) {
+			console.warn(`跳过字段：${e.message}`);
+		}
 	},
 
 	async v2_9DB(c) {
@@ -573,7 +582,8 @@ const dbInit = {
 			title TEXT NOT NULL,
 			auto_refresh INTEGER NOT NULL,
 			register_verify INTEGER NOT NULL,
-			add_email_verify INTEGER NOT NULL
+			add_email_verify INTEGER NOT NULL,
+			open_api_key TEXT NOT NULL DEFAULT ''
 		  )
 		`).run();
 

@@ -8,8 +8,21 @@ import constant from '../const/constant';
 import BizError from '../error/biz-error';
 import {t} from '../i18n/i18n'
 import verifyRecordService from './verify-record-service';
+import cryptoUtils from '../utils/crypto-utils';
 
 const settingService = {
+
+	maskValue(value, keep = 8) {
+		if (!value) {
+			return null;
+		}
+
+		if (value.length <= keep) {
+			return '*'.repeat(value.length);
+		}
+
+		return `${value.slice(0, keep)}******`;
+	},
 
 	async refresh(c) {
 		const settingRow = await orm(c).select().from(setting).get();
@@ -77,17 +90,18 @@ const settingService = {
 
 
 		if (!showSiteKey) {
-			settingRow.siteKey = settingRow.siteKey ? `${settingRow.siteKey.slice(0, 6)}******` : null;
+			settingRow.siteKey = this.maskValue(settingRow.siteKey, 6);
 		}
 
-		settingRow.secretKey = settingRow.secretKey ? `${settingRow.secretKey.slice(0, 6)}******` : null;
+		settingRow.secretKey = this.maskValue(settingRow.secretKey, 6);
 
 		Object.keys(settingRow.resendTokens).forEach(key => {
-			settingRow.resendTokens[key] = `${settingRow.resendTokens[key].slice(0, 12)}******`;
+			settingRow.resendTokens[key] = this.maskValue(settingRow.resendTokens[key], 12);
 		});
 
-		settingRow.s3AccessKey = settingRow.s3AccessKey ? `${settingRow.s3AccessKey.slice(0, 12)}******` : null;
-		settingRow.s3SecretKey = settingRow.s3SecretKey ? `${settingRow.s3SecretKey.slice(0, 12)}******` : null;
+		settingRow.s3AccessKey = this.maskValue(settingRow.s3AccessKey, 12);
+		settingRow.s3SecretKey = this.maskValue(settingRow.s3SecretKey, 12);
+		settingRow.openApiKey = this.maskValue(settingRow.openApiKey, 10);
 		settingRow.hasR2 = !!c.env.r2
 
 		let regVerifyOpen = false
@@ -112,6 +126,7 @@ const settingService = {
 
 	async set(c, params) {
 		const settingData = await this.query(c);
+		delete params.openApiKey;
 		let resendTokens = { ...settingData.resendTokens, ...params.resendTokens };
 		Object.keys(resendTokens).forEach(domain => {
 			if (!resendTokens[domain]) delete resendTokens[domain];
@@ -206,6 +221,18 @@ const settingService = {
 			linuxdoSwitch: settingRow.linuxdoSwitch,
 			minEmailPrefix: settingRow.minEmailPrefix
 		};
+	},
+
+	async regenerateOpenApiKey(c) {
+		const openApiKey = cryptoUtils.genRandomToken(40);
+		await orm(c).update(setting).set({ openApiKey }).run();
+		await this.refresh(c);
+		return openApiKey;
+	},
+
+	async clearOpenApiKey(c) {
+		await orm(c).update(setting).set({ openApiKey: '' }).run();
+		await this.refresh(c);
 	}
 };
 
