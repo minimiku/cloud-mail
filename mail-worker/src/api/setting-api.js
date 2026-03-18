@@ -12,6 +12,16 @@ app.get('/setting/query', async (c) => {
 	return c.json(result.ok(setting));
 });
 
+app.post('/setting/openApi/regenerate', async (c) => {
+	const openApiKey = await settingService.regenerateOpenApiKey(c);
+	return c.json(result.ok({ openApiKey }));
+});
+
+app.delete('/setting/openApi/clear', async (c) => {
+	await settingService.clearOpenApiKey(c);
+	return c.json(result.ok());
+});
+
 app.get('/setting/websiteConfig', async (c) => {
 	const setting = await settingService.websiteConfig(c);
 	return c.json(result.ok(setting));
@@ -26,4 +36,3 @@ app.delete('/setting/deleteBackground', async (c) => {
 	await settingService.deleteBackground(c);
 	return c.json(result.ok());
 });
-

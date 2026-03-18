@@ -192,6 +192,49 @@
             </div>
           </div>
 
+          <div class="settings-card">
+            <div class="card-title">{{ $t('openApi') }}</div>
+            <div class="card-content">
+              <div class="setting-desc">{{ $t('openApiDesc') }}</div>
+              <div class="setting-item">
+                <div><span>{{ $t('apiKeyStatus') }}</span></div>
+                <div class="forward open-api-status">
+                  <el-tag :type="setting.openApiKey ? 'success' : 'info'">
+                    {{ setting.openApiKey ? $t('apiEnabled') : $t('apiDisabled') }}
+                  </el-tag>
+                  <span class="open-api-key-text">{{ setting.openApiKey || 'API Key' }}</span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div><span>{{ $t('authHeader') }}</span></div>
+                <div class="forward open-api-status">
+                  <el-tag>X-API-Key</el-tag>
+                  <span class="route-path">Authorization: Bearer &lt;api_key&gt;</span>
+                  <el-button class="opt-button" size="small" type="primary" @click="copyOpenApiHeader">
+                    <Icon icon="solar:copy-line-duotone" width="16" height="16"/>
+                  </el-button>
+                </div>
+              </div>
+              <div class="open-api-routes">
+                <div class="open-api-route" v-for="item in openApiRoutes" :key="item.path">
+                  <div class="route-info">
+                    <el-tag size="small" :type="item.method === 'POST' ? 'success' : 'primary'">{{ item.method }}</el-tag>
+                    <span>{{ item.label }}</span>
+                  </div>
+                  <span class="route-path">{{ item.path }}</span>
+                </div>
+              </div>
+              <div class="open-api-actions">
+                <el-button type="primary" :loading="settingLoading" @click="handleRegenerateOpenApiKey">
+                  {{ $t('regenerateKey') }}
+                </el-button>
+                <el-button :disabled="!setting.openApiKey || settingLoading" @click="handleClearOpenApiKey">
+                  {{ $t('disableKey') }}
+                </el-button>
+              </div>
+            </div>
+          </div>
+
           <!-- Object Storage Card -->
           <div class="settings-card">
             <div class="card-title">{{ $t('oss') }}</div>
@@ -426,6 +469,15 @@
           <el-input type="text" :placeholder="$t('addResendTokenDesc')" v-model="resendTokenForm.token"/>
           <el-button type="primary" :loading="settingLoading" @click="saveResendToken">{{ $t('save') }}</el-button>
         </form>
+      </el-dialog>
+      <el-dialog v-model="openApiKeyShow" :title="$t('apiKey')" width="420" @closed="latestOpenApiKey = ''">
+        <div class="open-api-dialog">
+          <div class="setting-desc">{{ $t('openApiKeyTip') }}</div>
+          <el-input readonly :model-value="latestOpenApiKey"/>
+          <el-button type="primary" :disabled="!latestOpenApiKey" @click="copyText(latestOpenApiKey)">
+            {{ $t('copyKey') }}
+          </el-button>
+        </div>
       </el-dialog>
       <el-dialog v-model="r2DomainShow" :title="$t('addOsDomain')" width="340"
                  @closed="r2DomainInput = setting.r2Domain">
@@ -734,7 +786,14 @@
 
 <script setup>
 import {computed, defineOptions, reactive, ref} from "vue";
-import {deleteBackground, setBackground, settingQuery, settingSet} from "@/request/setting.js";
+import {
+  clearOpenApiKey,
+  deleteBackground,
+  regenerateOpenApiKey,
+  setBackground,
+  settingQuery,
+  settingSet
+} from "@/request/setting.js";
 import {useSettingStore} from "@/store/setting.js";
 import {useUiStore} from "@/store/ui.js";
 import {useUserStore} from "@/store/user.js";
@@ -765,6 +824,7 @@ const accountStore = useAccountStore();
 const userStore = useUserStore();
 const editTitleShow = ref(false)
 const resendTokenFormShow = ref(false)
+const openApiKeyShow = ref(false)
 const r2DomainShow = ref(false)
 const turnstileShow = ref(false)
 const tgSettingShow = ref(false)
@@ -777,6 +837,7 @@ const settingStore = useSettingStore();
 const uiStore = useUiStore();
 const {settings: setting} = storeToRefs(settingStore);
 const editTitle = ref('')
+const latestOpenApiKey = ref('')
 const settingLoading = ref(false)
 const clearS3Loading = ref(false)
 const r2DomainInput = ref('')
@@ -834,6 +895,12 @@ const authRefreshOptions = computed(() => [
   {label: '10s', value: 10},
   {label: '15s', value: 15},
   {label: '20s', value: 20},
+])
+
+const openApiRoutes = computed(() => [
+  {method: 'POST', path: '/api/openApi/mailbox/create', label: t('createMailboxApi')},
+  {method: 'GET', path: '/api/openApi/mailbox/emailList', label: t('listMailboxEmailsApi')},
+  {method: 'GET', path: '/api/openApi/mailbox/emailContent', label: t('mailboxEmailContentApi')},
 ])
 
 const tgChatId = ref([])
@@ -1259,11 +1326,89 @@ function backupSetting() {
   delete settingForm.resendTokens
   delete settingForm.siteKey
   delete settingForm.secretKey
+  delete settingForm.openApiKey
   backup = JSON.stringify(setting.value)
 }
 
 function cleanResendTokenForm() {
   resendTokenForm.token = ''
+}
+
+function maskSecret(value, keep = 10) {
+  if (!value) return null
+  if (value.length <= keep) return '*'.repeat(value.length)
+  return `${value.slice(0, keep)}******`
+}
+
+async function copyText(text, message = t('copySuccessMsg')) {
+  if (!text) return
+
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage({
+      message,
+      type: 'success',
+      plain: true,
+    })
+  } catch (err) {
+    console.error(`${t('copyFailMsg')}:`, err);
+    ElMessage({
+      message: t('copyFailMsg'),
+      type: 'error',
+      plain: true,
+    })
+  }
+}
+
+function copyOpenApiHeader() {
+  copyText('X-API-Key: <your_api_key>', t('copiedHeaderMsg'))
+}
+
+function handleRegenerateOpenApiKey() {
+  if (settingLoading.value) return
+
+  ElMessageBox.confirm(t('regenerateApiKeyConfirm'), {
+    confirmButtonText: t('confirm'),
+    cancelButtonText: t('cancel'),
+    type: 'warning'
+  }).then(() => {
+    settingLoading.value = true
+    regenerateOpenApiKey().then(({openApiKey}) => {
+      latestOpenApiKey.value = openApiKey
+      setting.value.openApiKey = maskSecret(openApiKey)
+      openApiKeyShow.value = true
+      ElMessage({
+        message: t('saveSuccessMsg'),
+        type: 'success',
+        plain: true,
+      })
+    }).finally(() => {
+      settingLoading.value = false
+    })
+  })
+}
+
+function handleClearOpenApiKey() {
+  if (!setting.value.openApiKey || settingLoading.value) return
+
+  ElMessageBox.confirm(t('clearApiKeyConfirm'), {
+    confirmButtonText: t('confirm'),
+    cancelButtonText: t('cancel'),
+    type: 'warning'
+  }).then(() => {
+    settingLoading.value = true
+    clearOpenApiKey().then(() => {
+      latestOpenApiKey.value = ''
+      setting.value.openApiKey = null
+      ElMessage({
+        message: t('saveSuccessMsg'),
+        type: 'success',
+        plain: true,
+      })
+    }).finally(() => {
+      settingLoading.value = false
+    })
+  })
 }
 
 function beforeChange() {
@@ -1279,6 +1424,7 @@ function change(e) {
   delete settingForm.s3AccessKey
   delete settingForm.s3SecretKey
   delete settingForm.resendTokens
+  delete settingForm.openApiKey
   editSetting(settingForm, false)
 }
 
@@ -1317,6 +1463,7 @@ function editSetting(settingForm, refreshStatus = true) {
     tgSettingShow.value = false
     thirdEmailShow.value = false
     forwardRulesShow.value = false
+    openApiKeyShow.value = false
     addVerifyCountShow.value = false
     regVerifyCountShow.value = false
     noticePopupShow.value = false
@@ -1338,6 +1485,61 @@ function editSetting(settingForm, refreshStatus = true) {
   overflow: hidden;
   background: var(--extra-light-fill) !important;
   position: relative;
+
+  .setting-desc {
+    color: var(--regular-text-color);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .open-api-status {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .open-api-key-text,
+  .route-path {
+    font-family: ui-monospace, SFMono-Regular, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    color: var(--regular-text-color);
+    word-break: break-all;
+  }
+
+  .open-api-routes {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .open-api-route {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--light-fill);
+  }
+
+  .route-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .open-api-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .open-api-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
 
   .loading {
     display: flex;
