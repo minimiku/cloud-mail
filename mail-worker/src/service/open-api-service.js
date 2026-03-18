@@ -21,51 +21,35 @@ const openApiService = {
 	async createMailbox(c, params) {
 		const { minEmailPrefix, emailPrefixFilter, openApiDomainList, domainList } = await settingService.query(c);
 		const roleRow = await roleService.selectDefaultRole(c);
-		const mailbox = this.resolveMailbox(params);
 		const password = params.password?.trim() || cryptoUtils.genRandomToken(16);
-		const allowedDomains = this.getAllowedDomains(openApiDomainList, domainList);
 
-		if (!mailbox) {
-			throw new BizError(t('emptyEmail'));
-		}
-
-		if (!verifyUtils.isEmail(mailbox)) {
-			throw new BizError(t('notEmail'));
-		}
-
-		if (!allowedDomains.includes(emailUtils.getDomain(mailbox))) {
-			throw new BizError(t('notEmailDomain'));
-		}
-
-		if (emailUtils.getName(mailbox).length < minEmailPrefix) {
-			throw new BizError(t('minEmailPrefix', { msg: minEmailPrefix }));
-		}
-
-		if (emailPrefixFilter.some(content => emailUtils.getName(mailbox).includes(content))) {
-			throw new BizError(t('banEmailPrefix'));
+		if (!roleRow) {
+			throw new BizError(t('roleNotExist'));
 		}
 
 		if (password.length < 6) {
 			throw new BizError(t('pwdMinLength'));
 		}
 
-		if (!roleRow) {
-			throw new BizError(t('roleNotExist'));
+		const allowedDomains = this.getAllowedDomains(openApiDomainList, domainList);
+		const permittedDomains = allowedDomains.filter(domain =>
+			roleService.hasAvailDomainPerm(roleRow.availDomain, `temp@${domain}`)
+		);
+
+		if (allowedDomains.length === 0) {
+			throw new BizError(t('notEmailDomain'));
 		}
 
-		if (!roleService.hasAvailDomainPerm(roleRow.availDomain, mailbox)) {
+		if (permittedDomains.length === 0) {
 			throw new BizError(t('noDomainPermReg'));
 		}
 
-		const accountRow = await accountService.selectByEmailIncludeDel(c, mailbox);
-
-		if (accountRow && accountRow.isDel === isDel.DELETE) {
-			throw new BizError(t('isDelUser'));
-		}
-
-		if (accountRow) {
-			throw new BizError(t('isRegAccount'));
-		}
+		const mailbox = await this.resolveMailbox(c, params, {
+			allowedDomains,
+			permittedDomains,
+			minEmailPrefix,
+			emailPrefixFilter
+		});
 
 		const { salt, hash } = await cryptoUtils.hashPassword(password);
 		const userId = await userService.insert(c, {
@@ -261,20 +245,39 @@ const openApiService = {
 		}
 	},
 
-	resolveMailbox(params) {
+	async resolveMailbox(c, params, config) {
 		const email = params.email?.trim();
 		const prefix = params.prefix?.trim();
 		const domain = params.domain?.replace(/^@/, '').trim();
 
 		if (email) {
+			await this.ensureMailboxAvailable(c, email, config);
 			return email;
 		}
 
-		if (!prefix || !domain) {
-			return '';
+		if (prefix && domain) {
+			const mailbox = `${prefix}@${domain}`;
+			await this.ensureMailboxAvailable(c, mailbox, config);
+			return mailbox;
 		}
 
-		return `${prefix}@${domain}`;
+		if (prefix) {
+			return await this.findMailboxByPrefix(c, prefix, config);
+		}
+
+		if (domain) {
+			if (!config.allowedDomains.includes(domain)) {
+				throw new BizError(t('notEmailDomain'));
+			}
+
+			if (!config.permittedDomains.includes(domain)) {
+				throw new BizError(t('noDomainPermReg'));
+			}
+
+			return await this.generateMailbox(c, [domain], config);
+		}
+
+		return await this.generateMailbox(c, config.permittedDomains, config);
 	},
 
 	getAllowedDomains(openApiDomainList, domainList) {
@@ -289,6 +292,166 @@ const openApiService = {
 		return (domainList || [])
 			.map(item => item.replace(/^@/, '').trim())
 			.filter(Boolean);
+	},
+
+	async findMailboxByPrefix(c, prefix, config) {
+		let hasDeletedMailbox = false;
+		let hasUsedMailbox = false;
+
+		for (const domain of config.permittedDomains) {
+			const mailbox = `${prefix}@${domain}`;
+			const status = await this.getMailboxStatus(c, mailbox, config);
+
+			if (status.available) {
+				return mailbox;
+			}
+
+			hasDeletedMailbox = hasDeletedMailbox || status.deleted;
+			hasUsedMailbox = hasUsedMailbox || status.exists;
+		}
+
+		if (hasDeletedMailbox) {
+			throw new BizError(t('isDelUser'));
+		}
+
+		if (hasUsedMailbox) {
+			throw new BizError(t('isRegAccount'));
+		}
+
+		throw new BizError(t('notEmail'));
+	},
+
+	async generateMailbox(c, domains, config) {
+		const attempts = 50;
+
+		for (let i = 0; i < attempts; i++) {
+			const prefix = this.generateMailboxPrefix();
+			const domainList = this.shuffle(domains);
+
+			for (const domain of domainList) {
+				const mailbox = `${prefix}@${domain}`;
+				const status = await this.getMailboxStatus(c, mailbox, config);
+
+				if (status.available) {
+					return mailbox;
+				}
+			}
+		}
+
+		throw new BizError('No available mailbox can be generated');
+	},
+
+	async ensureMailboxAvailable(c, mailbox, config) {
+		const status = await this.getMailboxStatus(c, mailbox, config);
+
+		if (status.available) {
+			return;
+		}
+
+		if (status.error) {
+			throw status.error;
+		}
+
+		throw new BizError(t('isRegAccount'));
+	},
+
+	async getMailboxStatus(c, mailbox, config) {
+		const staticError = this.validateMailbox(mailbox, config);
+
+		if (staticError) {
+			return {
+				available: false,
+				exists: false,
+				deleted: false,
+				error: staticError
+			};
+		}
+
+		const accountRow = await accountService.selectByEmailIncludeDel(c, mailbox);
+
+		if (!accountRow) {
+			return {
+				available: true,
+				exists: false,
+				deleted: false,
+				error: null
+			};
+		}
+
+		if (accountRow.isDel === isDel.DELETE) {
+			return {
+				available: false,
+				exists: false,
+				deleted: true,
+				error: new BizError(t('isDelUser'))
+			};
+		}
+
+		return {
+			available: false,
+			exists: true,
+			deleted: false,
+			error: new BizError(t('isRegAccount'))
+		};
+	},
+
+	validateMailbox(mailbox, config) {
+		if (!mailbox) {
+			return new BizError(t('emptyEmail'));
+		}
+
+		if (!verifyUtils.isEmail(mailbox)) {
+			return new BizError(t('notEmail'));
+		}
+
+		const domain = emailUtils.getDomain(mailbox);
+		const prefix = emailUtils.getName(mailbox);
+
+		if (!config.allowedDomains.includes(domain)) {
+			return new BizError(t('notEmailDomain'));
+		}
+
+		if (!config.permittedDomains.includes(domain)) {
+			return new BizError(t('noDomainPermReg'));
+		}
+
+		if (prefix.length < config.minEmailPrefix) {
+			return new BizError(t('minEmailPrefix', { msg: config.minEmailPrefix }));
+		}
+
+		if (config.emailPrefixFilter.some(content => prefix.includes(content))) {
+			return new BizError(t('banEmailPrefix'));
+		}
+
+		return null;
+	},
+
+	generateMailboxPrefix() {
+		const letters = 'abcdefghijklmnopqrstuvwxyz';
+		const alnum = 'abcdefghijklmnopqrstuvwxyz0123456789';
+		const length = 9 + (crypto.getRandomValues(new Uint8Array(1))[0] % 8);
+		const bytes = new Uint8Array(length);
+		crypto.getRandomValues(bytes);
+
+		let result = letters[bytes[0] % letters.length];
+
+		for (let i = 1; i < length; i++) {
+			result += alnum[bytes[i] % alnum.length];
+		}
+
+		return result;
+	},
+
+	shuffle(list) {
+		const copied = [...list];
+
+		for (let i = copied.length - 1; i > 0; i--) {
+			const randomByte = crypto.getRandomValues(new Uint8Array(1))[0];
+			const index = randomByte % (i + 1);
+			[copied[i], copied[index]] = [copied[index], copied[i]];
+		}
+
+		return copied;
 	},
 
 	formatContent(content, ossDomain) {
