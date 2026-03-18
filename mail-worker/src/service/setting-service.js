@@ -76,6 +76,10 @@ const settingService = {
 		setting.linuxdoSwitch = linuxdoSwitch;
 
 		setting.emailPrefixFilter = setting.emailPrefixFilter.split(",").filter(Boolean);
+		setting.openApiDomainList = setting.openApiDomainList
+			.split(",")
+			.filter(Boolean)
+			.map(item => item.startsWith('@') ? item : '@' + item);
 
 		c.set?.('setting', setting);
 		return setting;
@@ -134,6 +138,21 @@ const settingService = {
 
 		if (Array.isArray(params.emailPrefixFilter)) {
 			params.emailPrefixFilter = params.emailPrefixFilter + '';
+		}
+
+		if (Array.isArray(params.openApiDomainList)) {
+			const availableDomainList = settingData.domainList
+				.map(item => item.replace(/^@/, '').trim())
+				.filter(Boolean);
+			const selectedDomainList = params.openApiDomainList
+				.map(item => item.replace(/^@/, '').trim())
+				.filter(Boolean);
+
+			if (selectedDomainList.some(item => !availableDomainList.includes(item))) {
+				throw new BizError(t('notEmailDomain'));
+			}
+
+			params.openApiDomainList = selectedDomainList.join(',');
 		}
 
 		params.resendTokens = JSON.stringify(resendTokens);

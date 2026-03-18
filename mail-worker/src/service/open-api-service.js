@@ -19,10 +19,11 @@ import emailService from './email-service';
 const openApiService = {
 
 	async createMailbox(c, params) {
-		const { minEmailPrefix, emailPrefixFilter } = await settingService.query(c);
+		const { minEmailPrefix, emailPrefixFilter, openApiDomainList, domainList } = await settingService.query(c);
 		const roleRow = await roleService.selectDefaultRole(c);
-		const mailbox = params.email?.trim();
+		const mailbox = this.resolveMailbox(params);
 		const password = params.password?.trim() || cryptoUtils.genRandomToken(16);
+		const allowedDomains = this.getAllowedDomains(openApiDomainList, domainList);
 
 		if (!mailbox) {
 			throw new BizError(t('emptyEmail'));
@@ -32,7 +33,7 @@ const openApiService = {
 			throw new BizError(t('notEmail'));
 		}
 
-		if (!c.env.domain.includes(emailUtils.getDomain(mailbox))) {
+		if (!allowedDomains.includes(emailUtils.getDomain(mailbox))) {
 			throw new BizError(t('notEmailDomain'));
 		}
 
@@ -88,6 +89,8 @@ const openApiService = {
 			userId,
 			accountId: mailboxRow.accountId,
 			email: mailbox,
+			prefix: emailUtils.getName(mailbox),
+			domain: emailUtils.getDomain(mailbox),
 			password,
 			roleId: roleRow.roleId,
 			roleName: roleRow.name,
@@ -256,6 +259,36 @@ const openApiService = {
 		} catch (e) {
 			return [];
 		}
+	},
+
+	resolveMailbox(params) {
+		const email = params.email?.trim();
+		const prefix = params.prefix?.trim();
+		const domain = params.domain?.replace(/^@/, '').trim();
+
+		if (email) {
+			return email;
+		}
+
+		if (!prefix || !domain) {
+			return '';
+		}
+
+		return `${prefix}@${domain}`;
+	},
+
+	getAllowedDomains(openApiDomainList, domainList) {
+		const configuredDomains = (openApiDomainList || [])
+			.map(item => item.replace(/^@/, '').trim())
+			.filter(Boolean);
+
+		if (configuredDomains.length > 0) {
+			return configuredDomains;
+		}
+
+		return (domainList || [])
+			.map(item => item.replace(/^@/, '').trim())
+			.filter(Boolean);
 	},
 
 	formatContent(content, ossDomain) {

@@ -29,8 +29,17 @@ const dbInit = {
 		await this.v2_8DB(c);
 		await this.v2_9DB(c);
 		await this.v2_10DB(c);
+		await this.v2_11DB(c);
 		await settingService.refresh(c);
 		return c.text('success');
+	},
+
+	async v2_11DB(c) {
+		try {
+			await c.env.db.prepare(`ALTER TABLE setting ADD COLUMN open_api_domain_list TEXT NOT NULL DEFAULT '';`).run();
+		} catch (e) {
+			console.warn(`跳过字段：${e.message}`);
+		}
 	},
 
 	async v2_10DB(c) {
@@ -583,7 +592,8 @@ const dbInit = {
 			auto_refresh INTEGER NOT NULL,
 			register_verify INTEGER NOT NULL,
 			add_email_verify INTEGER NOT NULL,
-			open_api_key TEXT NOT NULL DEFAULT ''
+			open_api_key TEXT NOT NULL DEFAULT '',
+			open_api_domain_list TEXT NOT NULL DEFAULT ''
 		  )
 		`).run();
 
